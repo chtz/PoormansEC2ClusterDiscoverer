@@ -1,0 +1,30 @@
+buildscript {
+  repositories { jcenter() }
+  dependencies {
+    classpath 'com.github.jengelman.gradle.plugins:shadow:1.2.0'
+  }
+}
+
+apply plugin: 'java' 
+apply plugin: 'eclipse'
+apply plugin: 'com.github.johnrengelman.shadow'
+
+group = 'ch.furthermore.poorman'
+
+version = '1.0'
+
+jar {
+    manifest {
+        attributes 'Implementation-Title': 'ClusterDiscoverer', 'Implementation-Version': version
+        attributes 'Main-Class': 'ch.furthermore.poorman.ec2cd.ClusterDiscoverer'
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile 'com.amazonaws:aws-java-sdk:1.9.9'
+    testCompile 'junit:junit:4.+'
+}
