@@ -3,5 +3,27 @@ PoormansEC2ClusterDiscoverer
 
 Who are my AutoScalingGroup buddies?
 
-Version: -1.0.0 (a.k.a. UNTESTED ;-)
-
+Required: IAM Role policy:
+ 
+{
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances"
+      ],
+      "Resource": [
+        "*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "autoscaling:DescribeAutoScalingGroups"
+      ],
+      "Resource": [
+        "*"
+      ]
+    }
+  ]
+}

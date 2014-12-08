@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Map;
 
 import com.amazonaws.auth.InstanceProfileCredentialsProvider;
+import com.amazonaws.regions.Region;
+import com.amazonaws.regions.Regions;
 import com.amazonaws.services.autoscaling.AmazonAutoScaling;
 import com.amazonaws.services.autoscaling.AmazonAutoScalingClient;
 import com.amazonaws.services.autoscaling.model.AutoScalingGroup;
@@ -37,14 +39,18 @@ public class ClusterDiscoverer {
 	public ClusterDiscoverer(ClusterListener clusterListener) throws MalformedURLException, IOException {
 		this.clusterListener = clusterListener;
 		
-		autoScaling = new AmazonAutoScalingClient(new InstanceProfileCredentialsProvider());
-		ec2 = new AmazonEC2Client(new InstanceProfileCredentialsProvider());
+		Region region = lookupRegion();
 		
+		autoScaling = new AmazonAutoScalingClient(new InstanceProfileCredentialsProvider());
+		autoScaling.setRegion(region);
+		
+		ec2 = new AmazonEC2Client(new InstanceProfileCredentialsProvider());
+		ec2.setRegion(region);
+	
 		instanceId = lookupInstanceId();
 		
 		AutoScalingGroup myAutoScalingGroup = null;
-		outer: for (DescribeAutoScalingGroupsResult result = autoScaling.describeAutoScalingGroups(); 
-				result.getNextToken() != null;
+		outer: for (DescribeAutoScalingGroupsResult result = autoScaling.describeAutoScalingGroups(); ;
 				result = autoScaling.describeAutoScalingGroups(new DescribeAutoScalingGroupsRequest().withNextToken(result.getNextToken())))
 		{
 			for (AutoScalingGroup autoScalingGroup : result.getAutoScalingGroups()) {
@@ -54,9 +60,11 @@ public class ClusterDiscoverer {
 						break outer;
 					}
 				}
-			}			
+			}
+			
+			if (result.getNextToken() == null) break;
 		}
-		
+	
 		if (myAutoScalingGroup == null) {
 			throw new IllegalStateException("Unable to find my AutoScalingGroup");
 		}
@@ -72,7 +80,7 @@ public class ClusterDiscoverer {
 	}
 	
 	private synchronized void updatePeers(AutoScalingGroup autoScalingGroup) {
-		List<String> oldPeerInstanceIds = new LinkedList<String>();
+		List<String> oldPeerInstanceIds = new LinkedList<String>(peerIpByInstanceId.keySet());
 		for (Instance instance : autoScalingGroup.getInstances()) {
 			if (instanceId.equals(instance.getInstanceId())) continue;
 			
@@ -82,6 +90,9 @@ public class ClusterDiscoverer {
 				DescribeInstancesResult result = ec2.describeInstances(new DescribeInstancesRequest().withInstanceIds(instance.getInstanceId()));
 				if (result.getReservations().size() == 1 && result.getReservations().get(0).getInstances().size() == 1) {
 					String privateIp = result.getReservations().get(0).getInstances().get(0).getPrivateIpAddress();
+					
+					if (privateIp == null) continue;
+					
 					peerIpByInstanceId.put(instance.getInstanceId(),  privateIp);
 					
 					clusterListener.peerDiscovered(instance.getInstanceId(),  privateIp);
@@ -96,10 +107,27 @@ public class ClusterDiscoverer {
 		}
 	}
 	
-	@SuppressWarnings("deprecation")
 	private static String lookupInstanceId() throws MalformedURLException, IOException { 
-		URL metaUrl = new URL("http://169.254.169.254/latest/meta-data/instance-id");
-		URLConnection conn = metaUrl.openConnection();
+		return httpGet("http://169.254.169.254/latest/meta-data/instance-id");
+	}
+	
+	private static Region lookupRegion() throws MalformedURLException, IOException {
+		return Region.getRegion(Regions.fromName(lookupRegionName()));
+	}
+	
+	private static String lookupRegionName() throws MalformedURLException, IOException {
+		String s = lookupAvailabilityZone();
+		return s.substring(0, s.length() - 1);
+	}
+	
+	private static String lookupAvailabilityZone() throws MalformedURLException, IOException { 
+		return httpGet("http://169.254.169.254/latest/meta-data/placement/availability-zone");
+	}
+	
+	@SuppressWarnings("deprecation")
+	private static String httpGet(String urlString) throws MalformedURLException, IOException { 
+		URL url = new URL(urlString);
+		URLConnection conn = url.openConnection();
 		conn.setConnectTimeout(1500);
 		conn.setReadTimeout(1500);
 		DataInputStream in = new DataInputStream(conn.getInputStream());
@@ -123,6 +151,7 @@ public class ClusterDiscoverer {
 				System.out.println("peerDiscovered(" + instanceId + "," + privateIp + ")");
 			}
 		});
+		
 		String sleepProperty = System.getProperty("sleep");
 		if (sleepProperty != null) {
 			int sleep = Integer.parseInt(sleepProperty);
